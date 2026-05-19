@@ -1,0 +1,52 @@
+databases:
+  - name: asyncproof-postgres
+    plan: free
+    databaseName: asyncproof
+    user: asyncproof
+
+services:
+  - type: web
+    name: asyncproof-backend
+    env: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: asyncproof-postgres
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: BOT_UPLOAD_SECRET
+        generateValue: true
+      - key: BOT_SERVICE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: "*"
+
+  - type: web
+    name: asyncproof-bot-service
+    env: docker
+    rootDir: bot_service
+    envVars:
+      - key: BOT_UPLOAD_SECRET
+        sync: false
+      - key: BACKEND_URL
+        sync: false
+      - key: BOT_HEADLESS
+        value: "true"
+      - key: BOT_RECORD_SECONDS
+        value: "1800"
+
+  - type: web
+    name: asyncproof-frontend
+    env: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false

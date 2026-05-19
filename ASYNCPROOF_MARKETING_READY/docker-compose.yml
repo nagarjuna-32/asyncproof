@@ -1,0 +1,69 @@
+version: "3.9"
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: asyncproof
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d asyncproof"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/asyncproof
+      - SECRET_KEY=${SECRET_KEY:-change-this-secret-key}
+      - BOT_SERVICE_URL=http://bot:9000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_SUMMARY_MODEL=${OPENAI_SUMMARY_MODEL:-gpt-4o-mini}
+      - BOT_UPLOAD_SECRET=${BOT_UPLOAD_SECRET:-change-this-bot-secret}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - STORAGE_PROVIDER=${STORAGE_PROVIDER:-local}
+      - S3_BUCKET=${S3_BUCKET}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION:-ap-south-1}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_CHECKOUT_URL=${STRIPE_CHECKOUT_URL}
+      - CLOUDINARY_URL=${CLOUDINARY_URL}
+      - SUPABASE_BUCKET=${SUPABASE_BUCKET:-recordings}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - LOCAL_UPLOAD_DIR=/app/uploads
+      - RAZORPAY_WEBHOOK_SECRET=${RAZORPAY_WEBHOOK_SECRET}
+      - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET}
+      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID}
+      - RAZORPAY_PAYMENT_LINK=${RAZORPAY_PAYMENT_LINK}
+    volumes:
+      - ./uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  bot:
+    build: ./bot_service
+    ports:
+      - "9000:9000"
+    environment:
+      - BACKEND_URL=http://backend:8000
+      - BOT_UPLOAD_SECRET=${BOT_UPLOAD_SECRET:-change-this-bot-secret}
+      - BOT_HEADLESS=true
+      - BOT_RECORD_SECONDS=${BOT_RECORD_SECONDS:-1800}
+      - RECORDINGS_DIR=/app/recordings
+    volumes:
+      - ./recordings:/app/recordings
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
