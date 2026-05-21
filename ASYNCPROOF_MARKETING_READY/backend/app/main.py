@@ -17,17 +17,18 @@ load_dotenv()
 app = FastAPI(title="ASYNCPROOF Marketing Ready API")
 
 ALLOWED_ORIGINS = [
-    o.strip()
-    for o in os.getenv(
+    origin.strip()
+    for origin in os.getenv(
         "ALLOWED_ORIGINS",
-        "https://asyncproof.vercel.app"
+        "https://asyncproof.vercel.app,http://localhost:5173,http://127.0.0.1:5173"
     ).split(",")
-    if o.strip()
+    if origin.strip()
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -45,4 +46,11 @@ app.include_router(feedback_router)
 
 @app.get("/")
 def home():
-    return {"message":"ASYNCPROOF backend running"}
+    return {"message": "ASYNCPROOF backend running"}
+
+@app.get("/api/cors-test")
+def cors_test():
+    return {
+        "message": "CORS working",
+        "allowed_origins": ALLOWED_ORIGINS
+    }
