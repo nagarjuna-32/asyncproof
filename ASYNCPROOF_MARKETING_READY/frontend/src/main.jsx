@@ -9,8 +9,8 @@ const CONSENT_TEXT = 'This meeting will be recorded by ASYNCPROOF AI Assistant.'
 function App(){
   const [token,setToken]=useState(localStorage.getItem('token')||'');
   const [mode,setMode]=useState('login');
-  const [form,setForm]=useState({name:'Demo User',email:'demo@asyncproof.ai',password:'password123'});
-  const [meeting,setMeeting]=useState({title:'Marketing Demo Meeting',meeting_link:'https://meet.google.com/',consent_confirmed:false});
+  const [form,setForm]=useState({name:'',email:'',password:''});
+  const [meeting,setMeeting]=useState({title:'Marketing AI Meeting',meeting_link:'',consent_confirmed:false});
   const [meetings,setMeetings]=useState([]);
   const [report,setReport]=useState(null);
   const [plans,setPlans]=useState({});
