@@ -7,14 +7,15 @@ from pathlib import Path
 from app.services.ai_processor import transcribe_audio, generate_ai_report
 
 
-def extract_audio_to_wav(mp4_path: str, wav_path: str) -> None:
-    """Extract audio from an MP4 using ffmpeg into mono 16kHz wav."""
-    # ffmpeg must exist on the host running this backend (or in the Docker image)
+def extract_audio_to_wav(input_path: str, wav_path: str) -> None:
+    ext = Path(input_path).suffix.lower()
+
+    # If already audio, ffmpeg still normalizes it to wav
     cmd = [
         "ffmpeg",
         "-y",
         "-i",
-        mp4_path,
+        input_path,
         "-vn",
         "-ac",
         "1",
@@ -24,73 +25,133 @@ def extract_audio_to_wav(mp4_path: str, wav_path: str) -> None:
         "wav",
         wav_path,
     ]
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    subprocess.run(
+        cmd,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
 
 
-def transcribe_summarize_action_translate(mp4_path: str) -> dict:
-    """Runs: extract audio -> transcribe -> summary/action/decisions -> translate.
+def safe_report(transcript: str, error: str = "") -> dict:
+    return {
+        "summary": (
+            "Recording uploaded successfully. "
+            "AI transcription/report fallback was generated."
+        ),
+        "key_points": [
+            "Recording stored",
+            "Processing pipeline executed",
+            "Real transcription needs FFmpeg/OpenAI configured"
+        ],
+        "decisions": [
+            "Continue ASYNCPROOF testing"
+        ],
+        "action_items": [
+            "Check Render FFmpeg installation",
+            "Add valid OPENAI_API_KEY",
+            "Upload clear audio/video file"
+        ],
+        "deadlines": [
+            "Next testing cycle"
+        ],
+        "language": "en",
+        "productivity_score": 70,
+        "waste_score": 20,
+        "speakers": [],
+        "analytics": {
+            "fallback": True,
+            "error": error
+        },
+        "translation": {
+            "language": "en",
+            "summary_translated": (
+                "Recording uploaded successfully. "
+                "Translation fallback generated."
+            ),
+            "action_items_translated": [
+                "Check FFmpeg",
+                "Check OpenAI key"
+            ]
+        }
+    }
 
-    Translation is implemented as a lightweight second AI step. If OPENAI_API_KEY
-    is not configured, placeholders are returned by the underlying helpers.
-    """
-    with tempfile.TemporaryDirectory() as td:
-        wav_path = str(Path(td) / "audio.wav")
-        try:
-            extract_audio_to_wav(mp4_path, wav_path)
+
+def transcribe_summarize_action_translate(file_path: str) -> dict:
+    transcript = ""
+    error_message = ""
+
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            wav_path = str(Path(td) / "audio.wav")
+            extract_audio_to_wav(file_path, wav_path)
             transcript = transcribe_audio(wav_path)
-        except Exception as exc:
-            transcript = (
-                "Audio extraction/transcription fallback: uploaded recording was saved, "
-                f"but ffmpeg/audio processing failed: {exc}. "
-                "Install ffmpeg and upload a valid audio/video file for real transcription."
-            )
+    except Exception as exc:
+        error_message = str(exc)
+        transcript = (
+            "Fallback transcript: recording was uploaded and saved, "
+            "but audio extraction/transcription failed. "
+            f"Reason: {error_message}"
+        )
+
+    try:
         report = generate_ai_report(transcript)
+        if not isinstance(report, dict):
+            report = safe_report(transcript, "generate_ai_report returned invalid format")
+    except Exception as exc:
+        report = safe_report(transcript, str(exc))
 
-        # Translation placeholder/second step:
-        # If OPENAI_API_KEY is configured, reuse generate_ai_report-style model call
-        # but ask for translation. Otherwise return placeholder.
-        lang = report.get("language", "auto") or "auto"
-        summary = report.get("summary", "")
-        action_items = report.get("action_items", "")
+    if not report.get("summary"):
+        report = safe_report(transcript, "Empty summary generated")
 
-        translated = {
-            "language": lang,
-            "transcript_translated": transcript,
-            "summary_translated": summary,
-            "action_items_translated": action_items,
-        }
+    translated = report.get("translation") or {
+        "language": report.get("language", "en"),
+        "transcript_translated": transcript,
+        "summary_translated": report.get("summary", ""),
+        "action_items_translated": report.get("action_items", []),
+    }
 
-        # If OPENAI_API_KEY missing, generate_ai_report already returned placeholders.
-        # We keep translation as a placeholder in that case.
-        if os.getenv("OPENAI_API_KEY", "").strip():
-            try:
-                from openai import OpenAI
+    if os.getenv("OPENAI_API_KEY", "").strip():
+        try:
+            from openai import OpenAI
 
-                client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
-                prompt = (
-                    "Translate the meeting content into the requested language. "
-                    "Return strict JSON with keys: transcript_translated, summary_translated, action_items_translated, language.\n\n"
-                    f"Requested language: {lang}\n\n"
-                    f"Transcript:\n{transcript}\n\n"
-                    f"Summary:\n{summary}\n\n"
-                    f"Action items:\n{action_items}\n"
-                )
-                resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "Return valid JSON only."},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0.2,
-                )
-                translated = json.loads(resp.choices[0].message.content)
-            except Exception:
-                # Keep defaults if translation fails
-                pass
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
+            prompt = f"""
+Return valid JSON only.
 
-        return {
-            "transcript": transcript,
-            "report": report,
-            "translation": translated,
-        }
+Translate the meeting content.
 
+Keys:
+transcript_translated
+summary_translated
+action_items_translated
+language
+
+Transcript:
+{transcript}
+
+Summary:
+{report.get("summary", "")}
+
+Action Items:
+{report.get("action_items", "")}
+"""
+            resp = client.chat.completions.create(
+                model=os.getenv("OPENAI_SUMMARY_MODEL", "gpt-4o-mini"),
+                messages=[
+                    {"role": "system", "content": "Return valid JSON only."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.2,
+            )
+            translated = json.loads(resp.choices[0].message.content)
+        except Exception:
+            pass
+
+    return {
+        "transcript": transcript,
+        "report": report,
+        "translation": translated,
+    }
